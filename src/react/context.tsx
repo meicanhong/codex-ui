@@ -37,7 +37,8 @@ export type CodexThreadController = {
   refreshStatus: () => Promise<void>;
   sendMessage: (message: string) => Promise<boolean>;
   stop: () => Promise<void>;
-  loadThread: (thread: string | CodexThreadReference) => Promise<void>;
+  loadThread: (thread: string | CodexThreadReference) => Promise<boolean>;
+  resetThread: (thread?: CodexThreadReference | null) => boolean;
   respondToApproval: (
     requestId: string | number,
     decision: CodexApprovalDecision,
@@ -272,7 +273,7 @@ export function CodexThreadProvider({
             "Cannot load a thread while a turn is running",
           ),
         );
-        return;
+        return false;
       }
       const reference =
         typeof thread === "string"
@@ -286,15 +287,18 @@ export function CodexThreadProvider({
       try {
         const events = await transport.loadThread({
           threadId: reference.threadId,
+          conversationId: reference.conversationId,
         });
-        if (!mountedRef.current || loadEpochRef.current !== epoch) return;
+        if (!mountedRef.current || loadEpochRef.current !== epoch) return false;
         conversationIdRef.current = reference.conversationId;
         dispatch({ kind: "resetThread", threadId: reference.threadId });
         for (const event of events) dispatch(event);
+        return true;
       } catch (value) {
         if (mountedRef.current && loadEpochRef.current === epoch) {
           reportError(value);
         }
+        return false;
       } finally {
         if (mountedRef.current && loadEpochRef.current === epoch) {
           loadActiveRef.current = false;
@@ -303,6 +307,18 @@ export function CodexThreadProvider({
       }
     },
     [dispatch, reportError, transport],
+  );
+
+  const resetThread = useCallback(
+    (thread: CodexThreadReference | null = null) => {
+      if (abortRef.current || loadActiveRef.current) return false;
+      loadEpochRef.current += 1;
+      conversationIdRef.current = thread?.conversationId ?? null;
+      dispatch({ kind: "resetThread", threadId: thread?.threadId ?? null });
+      setError(null);
+      return true;
+    },
+    [dispatch],
   );
 
   const respondToApproval = useCallback(
@@ -390,6 +406,7 @@ export function CodexThreadProvider({
       sendMessage,
       stop,
       loadThread,
+      resetThread,
       respondToApproval,
       respondToServerRequest,
     }),
@@ -397,6 +414,7 @@ export function CodexThreadProvider({
       activeTurnId,
       error,
       loadThread,
+      resetThread,
       refreshStatus,
       respondToApproval,
       respondToServerRequest,

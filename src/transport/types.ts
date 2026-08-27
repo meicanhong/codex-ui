@@ -38,7 +38,10 @@ export interface CodexTransport {
     options?: { signal?: AbortSignal },
   ): AsyncIterable<CodexAppServerEnvelope>;
   interruptTurn(request: { threadId: string; turnId: string }): Promise<void>;
-  loadThread(request: { threadId: string }): Promise<CodexAppServerEnvelope[]>;
+  loadThread(request: {
+    threadId: string;
+    conversationId?: string;
+  }): Promise<CodexAppServerEnvelope[]>;
   respondToApproval(request: {
     requestId: string | number;
     method: string;

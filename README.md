@@ -52,6 +52,54 @@ HTTP transport 默认分别限制短请求、建连等待和 SSE 空闲时间；
 
 Provider 会把宿主侧稳定的 `conversationId` 与 App Server 返回的原生 `threadId` 分开保存：前者跨多轮不变，用于代理层会话映射；后者写入 `state.threadId`，供协议展示与自定义 transport 使用。可用 `initialConversationId` 或 `createConversationId` 指定宿主会话键。
 
+## 多会话
+
+需要让用户主动新建、切换和管理多个 Codex session 时，在 Thread Provider 内再挂载 Session Provider：
+
+```tsx
+import {
+  CodexChat,
+  CodexSessionProvider,
+  CodexSessionSwitcher,
+  CodexThreadProvider,
+} from "@customer-ai/codex-ui/react";
+import {
+  createFetchCodexSessionTransport,
+  createFetchSseCodexTransport,
+} from "@customer-ai/codex-ui/transport";
+
+const threadTransport = createFetchSseCodexTransport({
+  statusUrl: "/api/codex/status",
+  startTurnUrl: "/api/codex/turns",
+  loadThreadUrl: (_threadId, sessionId) =>
+    `/api/codex/sessions/${encodeURIComponent(sessionId ?? "")}`,
+});
+
+const sessionTransport = createFetchCodexSessionTransport({
+  sessionsUrl: "/api/codex/sessions",
+});
+
+export function Assistant() {
+  return (
+    <CodexThreadProvider transport={threadTransport}>
+      <CodexSessionProvider transport={sessionTransport}>
+        <CodexSessionSwitcher />
+        <CodexChat />
+      </CodexSessionProvider>
+    </CodexThreadProvider>
+  );
+}
+```
+
+`CodexSessionSwitcher` 内置新建、切换、重命名、归档、恢复和二次确认删除；当前 turn 运行时会禁止切换破坏上下文。`useCodexSessions()` 可用于宿主自定义会话列表。默认 Fetch transport 约定以下 REST 接口：
+
+- `GET /sessions`、`POST /sessions`
+- `GET /sessions/:id`（由 thread transport 的 `loadThreadUrl` 使用）
+- `PATCH /sessions/:id`、`DELETE /sessions/:id`
+- `POST /sessions/:id/archive`、`POST /sessions/:id/unarchive`
+
+Session API 的认证、租户归属与持久化仍由宿主负责。组件只使用宿主公开的 session ID；原生 `threadId` 不作为访问控制边界。
+
 默认 start-turn 请求是：
 
 ```json
@@ -123,13 +171,14 @@ Header、空状态和错误状态也都是公共插槽：
 ## React 公共组件
 
 - `CodexProvider` / `CodexThreadProvider`
+- `CodexSessionProvider` / `CodexSessionSwitcher`
 - `CodexChat` / `CodexThread` / `CodexTurn`
 - `CodexUserMessage` / `CodexAgentMessage`
 - `CodexReasoning` / `CodexToolCall` / `CodexPlan`
 - `CodexApproval` / `CodexApprovals` / `CodexError`
 - `CodexComposer` / `CodexRunStatus` / `CodexMarkdown`
 
-完整组件复用同一套默认渲染路径；使用细粒度组件不会得到另一套样式或协议解释。宿主既可以覆盖单个 `ThreadItem`，也可以只使用 `useCodexThread()` 自行组织界面。
+完整组件复用同一套默认渲染路径；使用细粒度组件不会得到另一套样式或协议解释。宿主既可以覆盖单个 `ThreadItem`，也可以只使用 `useCodexThread()` 与 `useCodexSessions()` 自行组织界面。
 
 审批请求在 composer 上方明确显示“等待确认”；处理后会离开 composer，并在对应 turn 的过程区保留紧凑的已允许、已拒绝或已取消状态。这样不会让历史审批永久挤占输入区，也不会丢失决策结果。
 

@@ -19,7 +19,9 @@ export type CodexFetchSseTransportOptions = {
   statusUrl: string;
   startTurnUrl: string;
   interruptTurnUrl?: string | ((threadId: string, turnId: string) => string);
-  loadThreadUrl?: string | ((threadId: string) => string);
+  loadThreadUrl?:
+    | string
+    | ((threadId: string, conversationId?: string) => string);
   approvalUrl?: string;
   serverRequestUrl?: string;
   headers?: RequestHeaders;
@@ -208,11 +210,14 @@ export function createFetchSseCodexTransport(
         },
       );
     },
-    async loadThread({ threadId }) {
+    async loadThread({ threadId, conversationId }) {
       if (!options.loadThreadUrl) {
         throw new CodexTransportUnsupportedError("loadThread");
       }
-      const url = resolveUrl(options.loadThreadUrl, threadId, "");
+      const url =
+        typeof options.loadThreadUrl === "function"
+          ? options.loadThreadUrl(threadId, conversationId)
+          : options.loadThreadUrl;
       return runRequestWithTimeout(
         "loadThread",
         requestTimeoutMs,
