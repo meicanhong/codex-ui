@@ -639,12 +639,32 @@ export function CodexToolCall({
   const item = itemState.item;
   const itemError = getItemError(itemState);
   const itemDetails = getItemDetails(itemState);
+  const isMcpToolCall = item.type === "mcpToolCall";
   return (
     <div className="codex-ui-process-row codex-ui-tool-row">
-      {itemState.lifecycle === "started" ? <Spinner /> : <ToolIcon />}
+      {itemState.lifecycle === "started" ? (
+        <Spinner />
+      ) : (
+        <ToolIcon isMcpToolCall={isMcpToolCall} />
+      )}
       <div>
-        <div>{presentation.label}</div>
-        {presentation.detail ? <small>{presentation.detail}</small> : null}
+        <div
+          className={joinClassNames(
+            "codex-ui-tool-heading",
+            isMcpToolCall ? "is-inline" : undefined,
+          )}
+        >
+          <span>{presentation.label}</span>
+          {presentation.detail ? (
+            isMcpToolCall ? (
+              <code className="codex-ui-tool-inline-detail">
+                {presentation.detail}
+              </code>
+            ) : (
+              <small>{presentation.detail}</small>
+            )
+          ) : null}
+        </div>
         {itemState.progress.map((progress, index) => (
           <small key={`${itemState.id}:progress:${index}`}>{progress}</small>
         ))}
@@ -1251,10 +1271,23 @@ function ChevronIcon() {
   return <span aria-hidden="true" className="codex-ui-chevron" />;
 }
 
-function ToolIcon() {
+function ToolIcon({ isMcpToolCall }: { isMcpToolCall: boolean }) {
   return (
     <span aria-hidden="true" className="codex-ui-tool-icon">
-      ⌁
+      {isMcpToolCall ? (
+        <svg className="codex-ui-tool-wrench" fill="none" viewBox="0 0 24 24">
+          <title>MCP tool</title>
+          <path
+            d="M14.7 6.3a4 4 0 0 0-4.7 5.1l-7.4 7.4a2.1 2.1 0 0 0 3 3l7.4-7.4a4 4 0 0 0 5.1-4.7l-2.4 2.4-3-3 2-2.4Z"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+          />
+        </svg>
+      ) : (
+        "⌁"
+      )}
     </span>
   );
 }

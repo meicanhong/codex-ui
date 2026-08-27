@@ -164,6 +164,11 @@ describe("CodexThreadView", () => {
     expect(html).toContain("Checking the schema");
     expect(html).toContain("Hook 内容");
     expect(html).toContain("Used StarRocks");
+    expect(html).toContain("codex-ui-tool-heading is-inline");
+    expect(html).toContain(
+      '<code class="codex-ui-tool-inline-detail">query</code>',
+    );
+    expect(html).toContain("codex-ui-tool-wrench");
     expect(html).toContain("openPage");
     expect(html).toContain("generated.png");
     expect(html).toContain("input.png");

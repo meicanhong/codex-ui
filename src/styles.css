@@ -281,6 +281,31 @@
   flex: 1;
 }
 
+.codex-ui-tool-heading.is-inline {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.codex-ui-tool-inline-detail {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 5px;
+  padding: 0 4px;
+  color: var(--codex-ui-text);
+  background: color-mix(
+    in srgb,
+    var(--codex-ui-text) 7%,
+    var(--codex-ui-surface)
+  );
+  font-family: var(--codex-ui-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .codex-ui-tool-row small {
   display: block;
   margin-top: 1px;
@@ -772,6 +797,12 @@
   color: var(--codex-ui-muted);
   line-height: 16px;
   text-align: center;
+}
+
+.codex-ui-tool-wrench {
+  display: block;
+  width: 15px;
+  height: 15px;
 }
 
 .codex-ui-error {
