@@ -1,0 +1,170 @@
+import type { CodexJsonObject } from "../../src/core/index.js";
+
+/** One valid 0.142.0-shaped sample for every supported ThreadItem branch. */
+export const officialThreadItems = [
+  {
+    type: "userMessage",
+    id: "user-1",
+    clientId: "client-1",
+    content: [
+      {
+        type: "text",
+        text: "用户消息",
+        text_elements: [
+          {
+            byteRange: { start: 0, end: 3 },
+            placeholder: null,
+          },
+        ],
+      },
+      { type: "image", url: "https://example.test/input.png", detail: "high" },
+      { type: "localImage", path: "/tmp/local.png", detail: "original" },
+      { type: "skill", name: "schema", path: "/skills/schema/SKILL.md" },
+      { type: "mention", name: "customer", path: "/customers/1" },
+    ],
+  },
+  {
+    type: "hookPrompt",
+    id: "hook-1",
+    fragments: [{ text: "Hook prompt text", hookRunId: "hook-run-1" }],
+  },
+  {
+    type: "agentMessage",
+    id: "agent-1",
+    text: "Commentary message",
+    phase: "commentary",
+    memoryCitation: {
+      entries: [
+        { path: "memory.md", lineStart: 1, lineEnd: 2, note: "source" },
+      ],
+      threadIds: ["source-thread"],
+    },
+  },
+  { type: "plan", id: "plan-1", text: "Plan item text" },
+  {
+    type: "reasoning",
+    id: "reasoning-1",
+    summary: ["Reasoning summary"],
+    content: ["private reasoning"],
+  },
+  {
+    type: "commandExecution",
+    id: "command-1",
+    command: "printf command-output",
+    cwd: "/workspace",
+    processId: "process-1",
+    source: "agent",
+    status: "completed",
+    commandActions: [
+      { type: "read", command: "cat file", name: "file", path: "/tmp/file" },
+      { type: "listFiles", command: "ls", path: null },
+      { type: "search", command: "rg value", query: "value", path: null },
+      { type: "unknown", command: "custom" },
+    ],
+    aggregatedOutput: "command-output",
+    exitCode: 0,
+    durationMs: 12,
+  },
+  {
+    type: "fileChange",
+    id: "file-1",
+    status: "completed",
+    changes: [
+      { path: "/tmp/add.ts", kind: { type: "add" }, diff: "+add" },
+      { path: "/tmp/delete.ts", kind: { type: "delete" }, diff: "-delete" },
+      {
+        path: "/tmp/from.ts",
+        kind: { type: "update", move_path: "/tmp/to.ts" },
+        diff: "-from\n+to",
+      },
+    ],
+  },
+  {
+    type: "mcpToolCall",
+    id: "mcp-1",
+    server: "analytics",
+    tool: "query",
+    status: "completed",
+    arguments: { sql: "SELECT 1" },
+    appContext: {
+      connectorId: "connector-1",
+      linkId: null,
+      resourceUri: "resource://schema",
+    },
+    mcpAppResourceUri: "resource://app",
+    pluginId: "plugin-1",
+    result: {
+      content: [{ type: "text", text: "one" }],
+      structuredContent: { rows: [1] },
+      _meta: { source: "fixture" },
+    },
+    error: null,
+    durationMs: 20,
+  },
+  {
+    type: "dynamicToolCall",
+    id: "dynamic-1",
+    namespace: "crm",
+    tool: "lookupCustomer",
+    arguments: { customerId: "1" },
+    status: "completed",
+    contentItems: [
+      { type: "inputText", text: "lookup" },
+      { type: "inputImage", imageUrl: "https://example.test/customer.png" },
+    ],
+    success: true,
+    durationMs: 22,
+  },
+  {
+    type: "collabAgentToolCall",
+    id: "collab-1",
+    tool: "spawnAgent",
+    status: "completed",
+    senderThreadId: "thread-parent",
+    receiverThreadIds: ["thread-child"],
+    prompt: "Audit the UI",
+    model: "gpt-5.5",
+    reasoningEffort: "high",
+    agentsStates: {
+      "thread-child": { status: "completed", message: "done" },
+    },
+  },
+  {
+    type: "subAgentActivity",
+    id: "subagent-1",
+    kind: "interacted",
+    agentThreadId: "thread-child",
+    agentPath: "/root/audit",
+  },
+  {
+    type: "webSearch",
+    id: "web-1",
+    query: "Codex UI",
+    action: {
+      type: "findInPage",
+      url: "https://example.test/docs",
+      pattern: "ThreadItem",
+    },
+  },
+  { type: "imageView", id: "image-view-1", path: "/tmp/view.png" },
+  { type: "sleep", id: "sleep-1", durationMs: 1_500 },
+  {
+    type: "imageGeneration",
+    id: "image-generation-1",
+    status: "completed",
+    revisedPrompt: "blue square",
+    result: "https://example.test/generated.png",
+    savedPath: "/tmp/generated.png",
+  },
+  {
+    type: "enteredReviewMode",
+    id: "review-entered-1",
+    review: "Review changes",
+  },
+  {
+    type: "exitedReviewMode",
+    id: "review-exited-1",
+    review: "Review complete",
+  },
+  { type: "contextCompaction", id: "compaction-1" },
+] satisfies CodexJsonObject[];

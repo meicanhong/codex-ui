@@ -1,0 +1,64 @@
+: Sanitized real Codex App Server 0.142.0 v2 turn recorded locally on 2026-08-27.
+
+event: app_server_event
+data: {"kind":"notification","method":"mcpServer/startupStatus/updated","params":{"threadId":"recorded-id-1","name":"starrocks","status":"starting","error":null},"streamId":"recorded-stream","sequence":1,"receivedAt":1700000000001,"raw":{"method":"mcpServer/startupStatus/updated","params":{"threadId":"recorded-id-1","name":"starrocks","status":"starting","error":null}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"thread/started","params":{"thread":{"id":"recorded-id-1","sessionId":"recorded-id-1","forkedFromId":null,"parentThreadId":null,"preview":"","ephemeral":true,"modelProvider":"sub2api","createdAt":1700000000,"updatedAt":1700000000,"recencyAt":1700000000,"status":{"type":"idle"},"path":null,"cwd":"/tmp/codex-ui-fixture","cliVersion":"0.142.0","source":"vscode","threadSource":null,"agentNickname":null,"agentRole":null,"gitInfo":null,"name":null,"turns":[]}},"streamId":"recorded-stream","sequence":2,"receivedAt":1700000000002,"raw":{"method":"thread/started","params":{"thread":{"id":"recorded-id-1","sessionId":"recorded-id-1","forkedFromId":null,"parentThreadId":null,"preview":"","ephemeral":true,"modelProvider":"sub2api","createdAt":1700000000,"updatedAt":1700000000,"recencyAt":1700000000,"status":{"type":"idle"},"path":null,"cwd":"/tmp/codex-ui-fixture","cliVersion":"0.142.0","source":"vscode","threadSource":null,"agentNickname":null,"agentRole":null,"gitInfo":null,"name":null,"turns":[]}}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"mcpServer/startupStatus/updated","params":{"threadId":"recorded-id-1","name":"starrocks","status":"ready","error":null},"streamId":"recorded-stream","sequence":3,"receivedAt":1700000000003,"raw":{"method":"mcpServer/startupStatus/updated","params":{"threadId":"recorded-id-1","name":"starrocks","status":"ready","error":null}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"thread/status/changed","params":{"threadId":"recorded-id-1","status":{"type":"active","activeFlags":[]}},"streamId":"recorded-stream","sequence":4,"receivedAt":1700000000004,"raw":{"method":"thread/status/changed","params":{"threadId":"recorded-id-1","status":{"type":"active","activeFlags":[]}}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"turn/started","params":{"threadId":"recorded-id-1","turn":{"id":"recorded-id-2","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":1700000000,"completedAt":null,"durationMs":null}},"streamId":"recorded-stream","sequence":5,"receivedAt":1700000000005,"raw":{"method":"turn/started","params":{"threadId":"recorded-id-1","turn":{"id":"recorded-id-2","items":[],"itemsView":"notLoaded","status":"inProgress","error":null,"startedAt":1700000000,"completedAt":null,"durationMs":null}}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/started","params":{"item":{"type":"userMessage","id":"recorded-id-3","clientId":null,"content":[{"type":"text","text":"请只回复：真实回放通过","text_elements":[]}]},"threadId":"recorded-id-1","turnId":"recorded-id-2","startedAtMs":1700000000000},"streamId":"recorded-stream","sequence":6,"receivedAt":1700000000006,"raw":{"method":"item/started","params":{"item":{"type":"userMessage","id":"recorded-id-3","clientId":null,"content":[{"type":"text","text":"请只回复：真实回放通过","text_elements":[]}]},"threadId":"recorded-id-1","turnId":"recorded-id-2","startedAtMs":1700000000000}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/completed","params":{"item":{"type":"userMessage","id":"recorded-id-3","clientId":null,"content":[{"type":"text","text":"请只回复：真实回放通过","text_elements":[]}]},"threadId":"recorded-id-1","turnId":"recorded-id-2","completedAtMs":1700000000000},"streamId":"recorded-stream","sequence":7,"receivedAt":1700000000007,"raw":{"method":"item/completed","params":{"item":{"type":"userMessage","id":"recorded-id-3","clientId":null,"content":[{"type":"text","text":"请只回复：真实回放通过","text_elements":[]}]},"threadId":"recorded-id-1","turnId":"recorded-id-2","completedAtMs":1700000000000}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/started","params":{"item":{"type":"reasoning","id":"recorded-id-4","summary":[],"content":[]},"threadId":"recorded-id-1","turnId":"recorded-id-2","startedAtMs":1700000000000},"streamId":"recorded-stream","sequence":8,"receivedAt":1700000000008,"raw":{"method":"item/started","params":{"item":{"type":"reasoning","id":"recorded-id-4","summary":[],"content":[]},"threadId":"recorded-id-1","turnId":"recorded-id-2","startedAtMs":1700000000000}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/reasoning/summaryPartAdded","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-4","summaryIndex":0},"streamId":"recorded-stream","sequence":9,"receivedAt":1700000000009,"raw":{"method":"item/reasoning/summaryPartAdded","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-4","summaryIndex":0}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/reasoning/summaryTextDelta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-4","delta":"**Providing exact phrase**","summaryIndex":0},"streamId":"recorded-stream","sequence":10,"receivedAt":1700000000010,"raw":{"method":"item/reasoning/summaryTextDelta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-4","delta":"**Providing exact phrase**","summaryIndex":0}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/completed","params":{"item":{"type":"reasoning","id":"recorded-id-4","summary":["**Providing exact phrase**"],"content":[]},"threadId":"recorded-id-1","turnId":"recorded-id-2","completedAtMs":1700000000000},"streamId":"recorded-stream","sequence":11,"receivedAt":1700000000011,"raw":{"method":"item/completed","params":{"item":{"type":"reasoning","id":"recorded-id-4","summary":["**Providing exact phrase**"],"content":[]},"threadId":"recorded-id-1","turnId":"recorded-id-2","completedAtMs":1700000000000}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/started","params":{"item":{"type":"agentMessage","id":"recorded-id-5","text":"","phase":"final_answer","memoryCitation":null},"threadId":"recorded-id-1","turnId":"recorded-id-2","startedAtMs":1700000000000},"streamId":"recorded-stream","sequence":12,"receivedAt":1700000000012,"raw":{"method":"item/started","params":{"item":{"type":"agentMessage","id":"recorded-id-5","text":"","phase":"final_answer","memoryCitation":null},"threadId":"recorded-id-1","turnId":"recorded-id-2","startedAtMs":1700000000000}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"真实"},"streamId":"recorded-stream","sequence":13,"receivedAt":1700000000013,"raw":{"method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"真实"}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"回"},"streamId":"recorded-stream","sequence":14,"receivedAt":1700000000014,"raw":{"method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"回"}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"放"},"streamId":"recorded-stream","sequence":15,"receivedAt":1700000000015,"raw":{"method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"放"}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"通过"},"streamId":"recorded-stream","sequence":16,"receivedAt":1700000000016,"raw":{"method":"item/agentMessage/delta","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","itemId":"recorded-id-5","delta":"通过"}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"item/completed","params":{"item":{"type":"agentMessage","id":"recorded-id-5","text":"真实回放通过","phase":"final_answer","memoryCitation":null},"threadId":"recorded-id-1","turnId":"recorded-id-2","completedAtMs":1700000000000},"streamId":"recorded-stream","sequence":17,"receivedAt":1700000000017,"raw":{"method":"item/completed","params":{"item":{"type":"agentMessage","id":"recorded-id-5","text":"真实回放通过","phase":"final_answer","memoryCitation":null},"threadId":"recorded-id-1","turnId":"recorded-id-2","completedAtMs":1700000000000}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"thread/tokenUsage/updated","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","tokenUsage":{"total":{"totalTokens":6567,"inputTokens":6526,"cachedInputTokens":5888,"outputTokens":41,"reasoningOutputTokens":31},"last":{"totalTokens":6567,"inputTokens":6526,"cachedInputTokens":5888,"outputTokens":41,"reasoningOutputTokens":31},"modelContextWindow":258400}},"streamId":"recorded-stream","sequence":18,"receivedAt":1700000000018,"raw":{"method":"thread/tokenUsage/updated","params":{"threadId":"recorded-id-1","turnId":"recorded-id-2","tokenUsage":{"total":{"totalTokens":6567,"inputTokens":6526,"cachedInputTokens":5888,"outputTokens":41,"reasoningOutputTokens":31},"last":{"totalTokens":6567,"inputTokens":6526,"cachedInputTokens":5888,"outputTokens":41,"reasoningOutputTokens":31},"modelContextWindow":258400}}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"thread/status/changed","params":{"threadId":"recorded-id-1","status":{"type":"idle"}},"streamId":"recorded-stream","sequence":20,"receivedAt":1700000000020,"raw":{"method":"thread/status/changed","params":{"threadId":"recorded-id-1","status":{"type":"idle"}}}}
+
+event: app_server_event
+data: {"kind":"notification","method":"turn/completed","params":{"threadId":"recorded-id-1","turn":{"id":"recorded-id-2","items":[],"itemsView":"notLoaded","status":"completed","error":null,"startedAt":1700000000,"completedAt":1700000000,"durationMs":4976}},"streamId":"recorded-stream","sequence":21,"receivedAt":1700000000021,"raw":{"method":"turn/completed","params":{"threadId":"recorded-id-1","turn":{"id":"recorded-id-2","items":[],"itemsView":"notLoaded","status":"completed","error":null,"startedAt":1700000000,"completedAt":1700000000,"durationMs":4976}}}}
+
+event: completed
+data: {"status":"completed"}
