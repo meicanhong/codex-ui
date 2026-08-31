@@ -12,6 +12,7 @@ import {
 } from "react";
 import {
   type CodexApprovalDecision,
+  type CodexAppServerEnvelope,
   type CodexEvent,
   type CodexJsonValue,
   type CodexThreadState,
@@ -20,6 +21,7 @@ import {
   selectTurns,
 } from "../core/index.js";
 import {
+  type CodexImageInput,
   type CodexRuntimeStatus,
   type CodexTransport,
   CodexTransportError,
@@ -35,7 +37,10 @@ export type CodexThreadController = {
   error: Error | null;
   transport: CodexTransport;
   refreshStatus: () => Promise<void>;
-  sendMessage: (message: string) => Promise<boolean>;
+  sendMessage: (
+    message: string,
+    images?: readonly CodexImageInput[],
+  ) => Promise<boolean>;
   stop: () => Promise<void>;
   loadThread: (thread: string | CodexThreadReference) => Promise<boolean>;
   resetThread: (thread?: CodexThreadReference | null) => boolean;
@@ -99,6 +104,8 @@ export function CodexThreadProvider({
   const conversationIdRef = useRef<string | null>(initialConversationId);
   const abortRef = useRef<AbortController | null>(null);
   const activeTurnIdRef = useRef<string | null>(null);
+  const backgroundTurnIdRef = useRef<string | null>(null);
+  const resumePendingRef = useRef(false);
   const loadEpochRef = useRef(0);
   const loadActiveRef = useRef(false);
   const mountedRef = useRef(false);
@@ -134,6 +141,99 @@ export function CodexThreadProvider({
     }
   }, [reportError, transport]);
 
+  const consumeTurnEvents = useCallback(
+    async (
+      events: AsyncIterable<CodexAppServerEnvelope>,
+      controller: AbortController,
+    ) => {
+      for await (const event of events) {
+        if (controller.signal.aborted) break;
+        if (event.method === "turn/started") {
+          const turn = event.params.turn;
+          if (turn && typeof turn === "object" && !Array.isArray(turn)) {
+            const id = turn.id;
+            if (typeof id === "string") {
+              activeTurnIdRef.current = id;
+              setActiveTurnId(id);
+            }
+          }
+        }
+        dispatch(event);
+      }
+    },
+    [dispatch],
+  );
+
+  const resumeBackgroundTurn = useCallback(
+    async (conversationId: string) => {
+      if (
+        transport.capabilities.backgroundTurns !== true ||
+        !transport.findActiveBackgroundTurn ||
+        !transport.subscribeBackgroundTurn ||
+        abortRef.current ||
+        resumePendingRef.current
+      ) {
+        return false;
+      }
+      resumePendingRef.current = true;
+      try {
+        const backgroundTurn = await transport.findActiveBackgroundTurn({
+          conversationId,
+        });
+        if (!backgroundTurn || !mountedRef.current || abortRef.current) {
+          return false;
+        }
+        const controller = new AbortController();
+        abortRef.current = controller;
+        backgroundTurnIdRef.current = backgroundTurn.turnId;
+        conversationIdRef.current = conversationId;
+        setRunning(true);
+        setError(null);
+        try {
+          await consumeTurnEvents(
+            transport.subscribeBackgroundTurn(
+              {
+                conversationId,
+                turnId: backgroundTurn.turnId,
+              },
+              { signal: controller.signal },
+            ),
+            controller,
+          );
+          return true;
+        } catch (value) {
+          if (controller.signal.aborted || isAbortError(value)) return true;
+          const nextError = reportError(value);
+          dispatch({
+            kind: "transportError",
+            threadId: stateRef.current.threadId,
+            turnId: activeTurnIdRef.current,
+            code: readErrorCode(nextError),
+            message: nextError.message,
+            occurredAt: Date.now(),
+          });
+          return false;
+        } finally {
+          if (abortRef.current === controller) {
+            abortRef.current = null;
+            backgroundTurnIdRef.current = null;
+            activeTurnIdRef.current = null;
+            if (mountedRef.current) {
+              setRunning(false);
+              setActiveTurnId(null);
+            }
+          }
+        }
+      } catch (value) {
+        if (mountedRef.current) reportError(value);
+        return false;
+      } finally {
+        resumePendingRef.current = false;
+      }
+    },
+    [consumeTurnEvents, dispatch, reportError, transport],
+  );
+
   useEffect(() => {
     if (autoRefreshStatus) void refreshStatus();
   }, [autoRefreshStatus, refreshStatus]);
@@ -148,10 +248,16 @@ export function CodexThreadProvider({
     };
   }, []);
 
+  useEffect(() => {
+    if (initialConversationId) {
+      void resumeBackgroundTurn(initialConversationId);
+    }
+  }, [initialConversationId, resumeBackgroundTurn]);
+
   const sendMessage = useCallback(
-    async (rawMessage: string) => {
+    async (rawMessage: string, images: readonly CodexImageInput[] = []) => {
       const message = rawMessage.trim();
-      if (!message) return true;
+      if (!message && images.length === 0) return true;
       if (abortRef.current) {
         throw new Error("codex_turn_already_running");
       }
@@ -176,22 +282,33 @@ export function CodexThreadProvider({
       dispatch({ kind: "clearTransportError" });
 
       try {
-        for await (const event of transport.startTurn(
-          { conversationId, threadId, message },
-          { signal: controller.signal },
-        )) {
-          if (controller.signal.aborted) break;
-          if (event.method === "turn/started") {
-            const turn = event.params.turn;
-            if (turn && typeof turn === "object" && !Array.isArray(turn)) {
-              const id = turn.id;
-              if (typeof id === "string") {
-                activeTurnIdRef.current = id;
-                setActiveTurnId(id);
-              }
-            }
-          }
-          dispatch(event);
+        const request = {
+          conversationId,
+          threadId,
+          message,
+          ...(images.length ? { images } : {}),
+        };
+        if (
+          transport.capabilities.backgroundTurns === true &&
+          transport.startBackgroundTurn &&
+          transport.subscribeBackgroundTurn
+        ) {
+          const backgroundTurn = await transport.startBackgroundTurn(request, {
+            signal: controller.signal,
+          });
+          backgroundTurnIdRef.current = backgroundTurn.turnId;
+          await consumeTurnEvents(
+            transport.subscribeBackgroundTurn(
+              { conversationId, turnId: backgroundTurn.turnId },
+              { signal: controller.signal },
+            ),
+            controller,
+          );
+        } else {
+          await consumeTurnEvents(
+            transport.startTurn(request, { signal: controller.signal }),
+            controller,
+          );
         }
         return true;
       } catch (value) {
@@ -209,6 +326,7 @@ export function CodexThreadProvider({
       } finally {
         if (abortRef.current === controller) {
           abortRef.current = null;
+          backgroundTurnIdRef.current = null;
           activeTurnIdRef.current = null;
           if (mountedRef.current) {
             setRunning(false);
@@ -220,6 +338,7 @@ export function CodexThreadProvider({
     [
       createConversationId,
       createThreadId,
+      consumeTurnEvents,
       dispatch,
       initialThreadId,
       reportError,
@@ -233,8 +352,11 @@ export function CodexThreadProvider({
     const threadId = stateRef.current.threadId;
     const turnId =
       activeTurnIdRef.current ?? findRunningTurnId(stateRef.current);
+    const backgroundTurnId = backgroundTurnIdRef.current;
+    const conversationId = conversationIdRef.current;
     abortRef.current = null;
     controller.abort();
+    backgroundTurnIdRef.current = null;
     activeTurnIdRef.current = null;
     setActiveTurnId(null);
     setRunning(false);
@@ -246,7 +368,27 @@ export function CodexThreadProvider({
         interruptedAt: Date.now(),
       });
     }
-    if (transport.capabilities.interrupt && threadId && turnId) {
+    if (
+      backgroundTurnId &&
+      conversationId &&
+      transport.capabilities.backgroundTurns === true &&
+      transport.interruptBackgroundTurn
+    ) {
+      void transport
+        .interruptBackgroundTurn({ conversationId, turnId: backgroundTurnId })
+        .catch((value) => {
+          if (!mountedRef.current) return;
+          const nextError = reportError(value);
+          dispatch({
+            kind: "transportError",
+            threadId,
+            turnId,
+            code: readErrorCode(nextError),
+            message: nextError.message,
+            occurredAt: Date.now(),
+          });
+        });
+    } else if (transport.capabilities.interrupt && threadId && turnId) {
       void Promise.resolve()
         .then(() => transport.interruptTurn({ threadId, turnId }))
         .catch((value) => {
@@ -293,6 +435,7 @@ export function CodexThreadProvider({
         conversationIdRef.current = reference.conversationId;
         dispatch({ kind: "resetThread", threadId: reference.threadId });
         for (const event of events) dispatch(event);
+        void resumeBackgroundTurn(reference.conversationId);
         return true;
       } catch (value) {
         if (mountedRef.current && loadEpochRef.current === epoch) {
@@ -306,7 +449,7 @@ export function CodexThreadProvider({
         }
       }
     },
-    [dispatch, reportError, transport],
+    [dispatch, reportError, resumeBackgroundTurn, transport],
   );
 
   const resetThread = useCallback(

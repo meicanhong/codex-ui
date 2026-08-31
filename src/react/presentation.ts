@@ -17,6 +17,12 @@ export type CodexUiLabels = {
   composerPlaceholder: string;
   send: string;
   stop: string;
+  attachImages: string;
+  removeImage: (name: string) => string;
+  imageLimitReached: (limit: number) => string;
+  imageTooLarge: (name: string, maxMegabytes: number) => string;
+  imageTypeUnsupported: (name: string) => string;
+  imageReadFailed: (name: string) => string;
   starting: string;
   working: (duration: string) => string;
   completed: (duration: string) => string;
@@ -57,6 +63,13 @@ export const defaultCodexUiLabels: CodexUiLabels = {
   composerPlaceholder: "Message Codex",
   send: "Send message",
   stop: "Stop",
+  attachImages: "Attach images",
+  removeImage: (name) => `Remove ${name}`,
+  imageLimitReached: (limit) => `You can attach up to ${limit} images.`,
+  imageTooLarge: (name, maxMegabytes) =>
+    `${name} is larger than ${maxMegabytes} MB.`,
+  imageTypeUnsupported: (name) => `${name} is not a supported image type.`,
+  imageReadFailed: (name) => `${name} could not be read.`,
   starting: "Starting",
   working: (duration) => `Worked for ${duration}`,
   completed: (duration) => `Worked for ${duration}`,

@@ -103,6 +103,7 @@ describe("createFetchSseCodexTransport", () => {
     const transport = createFetchSseCodexTransport({
       statusUrl: "/status",
       startTurnUrl: "/turns",
+      imageInput: true,
       fetch: fetchMock,
     });
 
@@ -117,6 +118,7 @@ describe("createFetchSseCodexTransport", () => {
       conversationId: "thread-1",
       threadId: "native-thread-1",
       message: "hello",
+      images: [{ url: "data:image/png;base64,iVBORw0KGgo=", detail: "high" }],
     })) {
       events.push(event);
     }
@@ -129,6 +131,7 @@ describe("createFetchSseCodexTransport", () => {
     expect(JSON.parse(String(request?.body))).toEqual({
       conversation_id: "thread-1",
       message: "hello",
+      images: [{ url: "data:image/png;base64,iVBORw0KGgo=", detail: "high" }],
       protocol_version: 2,
     });
   });
@@ -229,10 +232,104 @@ describe("createFetchSseCodexTransport", () => {
       loadThread: false,
       approvals: false,
       serverRequests: false,
+      backgroundTurns: false,
+      imageInput: false,
     });
     await expect(
       transport.interruptTurn({ threadId: "thread-1", turnId: "turn-1" }),
     ).rejects.toBeInstanceOf(CodexTransportUnsupportedError);
+  });
+
+  it("creates, discovers, subscribes, and interrupts a background turn", async () => {
+    const completed = {
+      kind: "notification",
+      method: "turn/completed",
+      params: {
+        threadId: "thread-1",
+        turn: { id: "native-turn-1", items: [], status: "completed" },
+      },
+      sequence: 2,
+      receivedAt: 200,
+      raw: {},
+    };
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json(
+          { turn_id: "background-turn-1", status: "queued", last_sequence: 0 },
+          { status: 202 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          turn: {
+            turn_id: "background-turn-1",
+            status: "running",
+            last_sequence: 1,
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        rawSseResponse(
+          `id: 2\nevent: app_server_event\ndata: ${JSON.stringify(completed)}\n\n` +
+            'id: 3\nevent: completed\ndata: {"status":"completed"}\n\n',
+        ),
+      )
+      .mockResolvedValueOnce(Response.json({ status: "interrupted" }));
+    const transport = createFetchSseCodexTransport({
+      statusUrl: "/status",
+      startTurnUrl: "/turns",
+      backgroundTurns: {
+        activeTurnUrl: (conversationId) => `/turns/${conversationId}/active`,
+        eventsUrl: (turnId, conversationId, afterSequence) =>
+          `/turns/${conversationId}/${turnId}/events?after=${afterSequence}`,
+        interruptUrl: (turnId, conversationId) =>
+          `/turns/${conversationId}/${turnId}`,
+      },
+      fetch: fetchMock,
+    });
+
+    const started = await transport.startBackgroundTurn?.({
+      conversationId: "conversation-1",
+      threadId: null,
+      message: "后台执行",
+    });
+    const active = await transport.findActiveBackgroundTurn?.({
+      conversationId: "conversation-1",
+    });
+    const events = [];
+    if (transport.subscribeBackgroundTurn) {
+      for await (const event of transport.subscribeBackgroundTurn({
+        conversationId: "conversation-1",
+        turnId: "background-turn-1",
+        afterSequence: 1,
+      })) {
+        events.push(event);
+      }
+    }
+    await transport.interruptBackgroundTurn?.({
+      conversationId: "conversation-1",
+      turnId: "background-turn-1",
+    });
+
+    expect(transport.capabilities.backgroundTurns).toBe(true);
+    expect(started).toMatchObject({
+      turnId: "background-turn-1",
+      status: "queued",
+    });
+    expect(active).toMatchObject({
+      turnId: "background-turn-1",
+      status: "running",
+    });
+    expect(events.map((event) => event.method)).toEqual(["turn/completed"]);
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [url, init?.method ?? "GET"]),
+    ).toEqual([
+      ["/turns", "POST"],
+      ["/turns/conversation-1/active", "GET"],
+      ["/turns/conversation-1/background-turn-1/events?after=1", "GET"],
+      ["/turns/conversation-1/background-turn-1", "DELETE"],
+    ]);
   });
 
   it("loads thread events and interrupts a turn through configured endpoints", async () => {

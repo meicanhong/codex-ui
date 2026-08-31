@@ -1,4 +1,6 @@
 import {
+  type ChangeEvent,
+  type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
@@ -24,6 +26,7 @@ import {
   selectTurnItems,
   selectTurns,
 } from "../core/index.js";
+import type { CodexImageInput } from "../transport/index.js";
 import { type CodexThreadController, useCodexThread } from "./context.js";
 import { CodexMarkdown } from "./markdown.js";
 import {
@@ -177,31 +180,112 @@ export type CodexComposerProps = {
   labels?: Partial<CodexUiLabels>;
   disabled?: boolean;
   maxLength?: number;
+  maxImages?: number;
+  maxImageBytes?: number;
 };
+
+type PendingImage = CodexImageInput & {
+  id: string;
+  name: string;
+};
+
+const ACCEPTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+const DEFAULT_MAX_IMAGES = 4;
+const DEFAULT_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export function CodexComposer({
   className,
   disabled = false,
   labels: labelOverrides,
   maxLength = 20_000,
+  maxImages = DEFAULT_MAX_IMAGES,
+  maxImageBytes = DEFAULT_MAX_IMAGE_BYTES,
 }: CodexComposerProps) {
-  const { running, sendMessage, stop, threadLoading } = useCodexThread();
+  const { running, sendMessage, stop, threadLoading, transport } =
+    useCodexThread();
   const labels = useLabels(labelOverrides);
   const [message, setMessage] = useState("");
+  const [images, setImages] = useState<PendingImage[]>([]);
+  const [imageError, setImageError] = useState<string | null>(null);
+  const imageInput = useRef<HTMLInputElement>(null);
+  const imageInputEnabled = transport.capabilities.imageInput === true;
   const canSend =
-    Boolean(message.trim()) && !disabled && !running && !threadLoading;
+    (Boolean(message.trim()) || images.length > 0) &&
+    !disabled &&
+    !running &&
+    !threadLoading;
+
+  const addImageFiles = async (files: File[]) => {
+    if (!imageInputEnabled || files.length === 0) return;
+    setImageError(null);
+    const availableSlots = Math.max(0, maxImages - images.length);
+    if (files.length > availableSlots) {
+      setImageError(labels.imageLimitReached(maxImages));
+    }
+    const pending: PendingImage[] = [];
+    for (const [index, file] of files.slice(0, availableSlots).entries()) {
+      if (!ACCEPTED_IMAGE_TYPES.has(file.type)) {
+        setImageError(labels.imageTypeUnsupported(file.name));
+        continue;
+      }
+      if (file.size > maxImageBytes) {
+        setImageError(
+          labels.imageTooLarge(
+            file.name,
+            Math.ceil(maxImageBytes / 1024 / 1024),
+          ),
+        );
+        continue;
+      }
+      try {
+        pending.push({
+          id: `${Date.now()}-${index}-${file.name}`,
+          name: file.name,
+          url: await readFileAsDataUrl(file),
+          detail: "auto",
+        });
+      } catch {
+        setImageError(labels.imageReadFailed(file.name));
+      }
+    }
+    if (pending.length > 0) {
+      setImages((current) => [...current, ...pending].slice(0, maxImages));
+    }
+  };
 
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     if (!canSend) return;
     const submitted = message;
+    const submittedImages = images;
     setMessage("");
+    setImages([]);
+    setImageError(null);
     try {
-      const sent = await sendMessage(submitted);
-      if (!sent) setMessage(submitted);
+      const sent = await sendMessage(submitted, submittedImages);
+      if (!sent) {
+        setMessage(submitted);
+        setImages(submittedImages);
+      }
     } catch {
       setMessage(submitted);
+      setImages(submittedImages);
     }
+  };
+
+  const onImageChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []);
+    event.currentTarget.value = "";
+    void addImageFiles(files);
+  };
+
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files).filter((file) =>
+      file.type.startsWith("image/"),
+    );
+    if (files.length === 0) return;
+    event.preventDefault();
+    void addImageFiles(files);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -214,40 +298,110 @@ export function CodexComposer({
 
   return (
     <form
-      className={joinClassNames("codex-ui-composer", className)}
+      className={joinClassNames(
+        "codex-ui-composer",
+        images.length > 0 ? "has-images" : undefined,
+        className,
+      )}
       onSubmit={(event) => void submit(event)}
     >
-      <textarea
-        aria-label={labels.composerPlaceholder}
-        disabled={disabled || running || threadLoading}
-        maxLength={maxLength}
-        onChange={(event) => setMessage(event.target.value)}
-        onKeyDown={onKeyDown}
-        placeholder={labels.composerPlaceholder}
-        rows={1}
-        value={message}
-      />
-      {running ? (
-        <button
-          aria-label={labels.stop}
-          className="codex-ui-composer-action codex-ui-stop"
-          onClick={() => void stop()}
-          type="button"
-        >
-          <span aria-hidden="true" />
-        </button>
-      ) : (
-        <button
-          aria-label={labels.send}
-          className="codex-ui-composer-action codex-ui-send"
-          disabled={!canSend}
-          type="submit"
-        >
-          <ArrowIcon />
-        </button>
-      )}
+      {imageInputEnabled ? (
+        <input
+          accept="image/jpeg,image/png,image/webp"
+          className="codex-ui-image-input"
+          multiple
+          onChange={onImageChange}
+          ref={imageInput}
+          type="file"
+        />
+      ) : null}
+      {images.length > 0 ? (
+        <div className="codex-ui-pending-images">
+          {images.map((image) => (
+            <div className="codex-ui-pending-image" key={image.id}>
+              <img alt={image.name} src={image.url} />
+              <button
+                aria-label={labels.removeImage(image.name)}
+                className="codex-ui-remove-image"
+                disabled={running || threadLoading}
+                onClick={() =>
+                  setImages((current) =>
+                    current.filter((candidate) => candidate.id !== image.id),
+                  )
+                }
+                type="button"
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {imageError ? (
+        <div className="codex-ui-image-error" role="alert">
+          {imageError}
+        </div>
+      ) : null}
+      <div className="codex-ui-composer-row">
+        {imageInputEnabled ? (
+          <button
+            aria-label={labels.attachImages}
+            className="codex-ui-attach-image"
+            disabled={
+              disabled || running || threadLoading || images.length >= maxImages
+            }
+            onClick={() => imageInput.current?.click()}
+            type="button"
+          >
+            <ImageIcon />
+          </button>
+        ) : null}
+        <textarea
+          aria-label={labels.composerPlaceholder}
+          disabled={disabled || running || threadLoading}
+          maxLength={maxLength}
+          onChange={(event) => setMessage(event.target.value)}
+          onKeyDown={onKeyDown}
+          onPaste={onPaste}
+          placeholder={labels.composerPlaceholder}
+          rows={1}
+          value={message}
+        />
+        {running ? (
+          <button
+            aria-label={labels.stop}
+            className="codex-ui-composer-action codex-ui-stop"
+            onClick={() => void stop()}
+            type="button"
+          >
+            <span aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            aria-label={labels.send}
+            className="codex-ui-composer-action codex-ui-send"
+            disabled={!canSend}
+            type="submit"
+          >
+            <ArrowIcon />
+          </button>
+        )}
+      </div>
     </form>
   );
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(reader.error ?? new Error("codex_image_read_failed"));
+    reader.onload = () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new Error("codex_image_read_failed"));
+    reader.readAsDataURL(file);
+  });
 }
 
 export function CodexApprovals({
@@ -329,6 +483,7 @@ export function CodexChat({
   const [clock, setClock] = useState(0);
   const scrollRegion = useRef<HTMLDivElement>(null);
   const followOutput = useRef(true);
+  const observedScrollHeight = useRef(0);
   useEffect(() => {
     if (!running) return;
     followOutput.current = true;
@@ -343,6 +498,7 @@ export function CodexChat({
     if (!region || !content || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (followOutput.current) region.scrollTop = region.scrollHeight;
+      observedScrollHeight.current = region.scrollHeight;
     });
     observer.observe(content);
     return () => observer.disconnect();
@@ -350,7 +506,9 @@ export function CodexChat({
 
   useLayoutEffect(() => {
     const region = scrollRegion.current;
-    if (region && followOutput.current) region.scrollTop = region.scrollHeight;
+    if (!region) return;
+    if (followOutput.current) region.scrollTop = region.scrollHeight;
+    observedScrollHeight.current = region.scrollHeight;
   });
 
   return (
@@ -365,8 +523,15 @@ export function CodexChat({
         className="codex-ui-scroll-region"
         onScroll={(event) => {
           const region = event.currentTarget;
+          if (
+            followOutput.current &&
+            region.scrollHeight > observedScrollHeight.current
+          ) {
+            return;
+          }
           followOutput.current =
             region.scrollHeight - region.scrollTop - region.clientHeight < 48;
+          observedScrollHeight.current = region.scrollHeight;
         }}
         ref={scrollRegion}
         role="log"
@@ -1302,4 +1467,51 @@ function ReasoningIcon() {
 
 function ArrowIcon() {
   return <span aria-hidden="true">↑</span>;
+}
+
+function ImageIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="codex-ui-attach-image-icon"
+      fill="none"
+      viewBox="0 0 24 24"
+    >
+      <rect
+        height="16"
+        rx="3"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        width="18"
+        x="3"
+        y="4"
+      />
+      <circle cx="9" cy="10" fill="currentColor" r="1.5" />
+      <path
+        d="m5.5 17 4.2-4.2 2.8 2.8 2-2 4 3.4"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="codex-ui-remove-image-icon"
+      fill="none"
+      viewBox="0 0 12 12"
+    >
+      <path
+        d="m3 3 6 6M9 3 3 9"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="1.5"
+      />
+    </svg>
+  );
 }

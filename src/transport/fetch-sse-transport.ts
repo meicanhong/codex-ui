@@ -6,6 +6,7 @@ import type {
 } from "../core/index.js";
 import { CodexSseDecoder, parseAppServerEnvelopeFrame } from "./sse-parser.js";
 import {
+  type CodexBackgroundTurnReference,
   type CodexRuntimeStatus,
   type CodexStartTurnRequest,
   type CodexTransport,
@@ -15,9 +16,25 @@ import {
 
 type RequestHeaders = HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 
+type CodexBackgroundTurnEndpoints = {
+  activeTurnUrl: string | ((conversationId: string) => string);
+  eventsUrl:
+    | string
+    | ((
+        turnId: string,
+        conversationId: string,
+        afterSequence: number,
+      ) => string);
+  interruptUrl: string | ((turnId: string, conversationId: string) => string);
+};
+
 export type CodexFetchSseTransportOptions = {
   statusUrl: string;
   startTurnUrl: string;
+  /** Split turn creation from replayable SSE subscriptions. */
+  backgroundTurns?: CodexBackgroundTurnEndpoints;
+  /** Declare that the host endpoint accepts image inputs. Disabled by default. */
+  imageInput?: boolean;
   interruptTurnUrl?: string | ((threadId: string, turnId: string) => string);
   loadThreadUrl?:
     | string
@@ -45,11 +62,17 @@ export type CodexFetchSseTransportOptions = {
   turnStartTimeoutMs?: number;
   /** Maximum silence between SSE chunks. Defaults to 5 minutes; 0 disables it. */
   streamIdleTimeoutMs?: number;
+  /** Delay between reconnect attempts for a background SSE subscription. */
+  backgroundReconnectDelayMs?: number;
+  /** Maximum consecutive reconnect attempts. Defaults to 5. */
+  backgroundReconnectAttempts?: number;
 };
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_TURN_START_TIMEOUT_MS = 60_000;
 const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 300_000;
+const DEFAULT_BACKGROUND_RECONNECT_DELAY_MS = 500;
+const DEFAULT_BACKGROUND_RECONNECT_ATTEMPTS = 5;
 
 export function createFetchSseCodexTransport(
   options: CodexFetchSseTransportOptions,
@@ -76,6 +99,15 @@ export function createFetchSseCodexTransport(
     DEFAULT_STREAM_IDLE_TIMEOUT_MS,
     "streamIdleTimeoutMs",
   );
+  const backgroundReconnectDelayMs = normalizeTimeout(
+    options.backgroundReconnectDelayMs,
+    DEFAULT_BACKGROUND_RECONNECT_DELAY_MS,
+    "backgroundReconnectDelayMs",
+  );
+  const backgroundReconnectAttempts = normalizeAttemptCount(
+    options.backgroundReconnectAttempts,
+    DEFAULT_BACKGROUND_RECONNECT_ATTEMPTS,
+  );
 
   return {
     capabilities: {
@@ -83,6 +115,8 @@ export function createFetchSseCodexTransport(
       loadThread: Boolean(options.loadThreadUrl),
       approvals: Boolean(options.approvalUrl),
       serverRequests: Boolean(options.serverRequestUrl),
+      backgroundTurns: Boolean(options.backgroundTurns),
+      imageInput: options.imageInput === true,
     },
     async getStatus(requestOptions) {
       return runRequestWithTimeout(
@@ -99,6 +133,177 @@ export function createFetchSseCodexTransport(
               ? await readJsonObject(response, "codex_status_unavailable")
               : await readJsonResponse(response, "codex_status_unavailable");
           return (options.parseStatus ?? parseDefaultStatus)(value);
+        },
+      );
+    },
+    async startBackgroundTurn(turnRequest, requestOptions) {
+      if (!options.backgroundTurns) {
+        throw new CodexTransportUnsupportedError("backgroundTurns");
+      }
+      return runRequestWithTimeout(
+        "startBackgroundTurn",
+        turnStartTimeoutMs,
+        requestOptions?.signal,
+        async (signal) => {
+          const response = await request(options.startTurnUrl, {
+            method: "POST",
+            headers: await jsonHeaders(options.headers),
+            body: JSON.stringify(
+              options.serializeStartTurn?.(turnRequest) ??
+                defaultSerializeStartTurn(turnRequest),
+            ),
+            signal,
+          });
+          const value = await readJsonResponse(
+            response,
+            "codex_turn_unavailable",
+          );
+          return parseBackgroundTurnReference(value);
+        },
+      );
+    },
+    async findActiveBackgroundTurn({ conversationId }) {
+      if (!options.backgroundTurns) {
+        throw new CodexTransportUnsupportedError("backgroundTurns");
+      }
+      const url = resolveBackgroundActiveUrl(
+        options.backgroundTurns.activeTurnUrl,
+        conversationId,
+      );
+      return runRequestWithTimeout(
+        "findActiveBackgroundTurn",
+        requestTimeoutMs,
+        undefined,
+        async (signal) => {
+          const response = await request(url, {
+            headers: await resolveHeaders(options.headers),
+            signal,
+          });
+          const value = await readJsonResponse(
+            response,
+            "codex_turn_subscription_unavailable",
+          );
+          const turn = asObject(value.turn);
+          return turn ? parseBackgroundTurnReference(turn) : null;
+        },
+      );
+    },
+    async *subscribeBackgroundTurn(turnRequest, requestOptions) {
+      if (!options.backgroundTurns) {
+        throw new CodexTransportUnsupportedError("backgroundTurns");
+      }
+      let afterSequence = turnRequest.afterSequence ?? 0;
+      let attempts = 0;
+      while (true) {
+        let progressed = false;
+        try {
+          const url = resolveBackgroundEventsUrl(
+            options.backgroundTurns.eventsUrl,
+            turnRequest.turnId,
+            turnRequest.conversationId,
+            afterSequence,
+          );
+          const deadline = createRequestDeadline(
+            "subscribeBackgroundTurn",
+            0,
+            requestOptions?.signal,
+          );
+          let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+          let reachedStreamEnd = false;
+          try {
+            const response = await deadline.race(
+              request(url, {
+                headers: await resolveHeaders(options.headers),
+                signal: deadline.signal,
+              }),
+            );
+            if (!response.ok || !response.body) {
+              throw await responseError(
+                response,
+                "codex_turn_subscription_unavailable",
+              );
+            }
+            const decoder = new CodexSseDecoder();
+            reader = response.body.getReader();
+            while (true) {
+              const chunk = await readStreamChunk(
+                reader,
+                deadline,
+                streamIdleTimeoutMs,
+              );
+              if (chunk.done) {
+                reachedStreamEnd = true;
+                break;
+              }
+              for (const frame of decoder.push(chunk.value)) {
+                afterSequence = readFrameSequence(frame.id, afterSequence);
+                progressed = true;
+                if (frame.event === "completed") return;
+                const envelope = parseTurnFrame(frame);
+                if (envelope) yield envelope;
+              }
+            }
+            for (const frame of decoder.finish()) {
+              afterSequence = readFrameSequence(frame.id, afterSequence);
+              progressed = true;
+              if (frame.event === "completed") return;
+              const envelope = parseTurnFrame(frame);
+              if (envelope) yield envelope;
+            }
+          } finally {
+            deadline.dispose();
+            if (reader) {
+              if (!reachedStreamEnd) {
+                try {
+                  await reader.cancel();
+                } catch {
+                  // The underlying subscription may already be aborted.
+                }
+              }
+              reader.releaseLock();
+            }
+          }
+        } catch (value) {
+          if (requestOptions?.signal?.aborted)
+            throw readAbortReason(requestOptions.signal);
+          if (!isReconnectableBackgroundError(value)) throw value;
+        }
+        attempts = progressed ? 0 : attempts + 1;
+        if (attempts > backgroundReconnectAttempts) {
+          throw new CodexTransportError(
+            "codex_turn_subscription_unavailable",
+            "Codex background turn subscription could not be restored",
+            { attempts, turnId: turnRequest.turnId },
+          );
+        }
+        await waitForReconnect(
+          backgroundReconnectDelayMs,
+          requestOptions?.signal,
+        );
+      }
+    },
+    async interruptBackgroundTurn({ conversationId, turnId }) {
+      if (!options.backgroundTurns) {
+        throw new CodexTransportUnsupportedError("backgroundTurns");
+      }
+      const url = resolveBackgroundInterruptUrl(
+        options.backgroundTurns.interruptUrl,
+        turnId,
+        conversationId,
+      );
+      await runRequestWithTimeout(
+        "interruptBackgroundTurn",
+        requestTimeoutMs,
+        undefined,
+        async (signal) => {
+          const response = await request(url, {
+            method: "DELETE",
+            headers: await resolveHeaders(options.headers),
+            signal,
+          });
+          if (!response.ok) {
+            throw await responseError(response, "codex_interrupt_failed");
+          }
         },
       );
     },
@@ -420,6 +625,18 @@ function normalizeTimeout(
   return timeout;
 }
 
+function normalizeAttemptCount(value: number | undefined, fallback: number) {
+  const attempts = value ?? fallback;
+  if (!Number.isInteger(attempts) || attempts < 0) {
+    throw new CodexTransportError(
+      "codex_transport_invalid_reconnect_attempts",
+      "backgroundReconnectAttempts must be a non-negative integer",
+      { value: attempts },
+    );
+  }
+  return attempts;
+}
+
 function readAbortReason(signal: AbortSignal | undefined) {
   if (signal?.reason instanceof Error) return signal.reason;
   const error = new Error("The operation was aborted");
@@ -462,6 +679,14 @@ function defaultSerializeStartTurn(
   return {
     conversation_id: request.conversationId,
     message: request.message,
+    ...(request.images?.length
+      ? {
+          images: request.images.map((image) => ({
+            url: image.url,
+            ...(image.detail ? { detail: image.detail } : {}),
+          })),
+        }
+      : {}),
     protocol_version: 2,
     ...(request.clientTurnId ? { client_turn_id: request.clientTurnId } : {}),
   };
@@ -523,6 +748,80 @@ async function jsonHeaders(headers: RequestHeaders | undefined) {
   if (!result.has("Content-Type"))
     result.set("Content-Type", "application/json");
   return result;
+}
+
+function parseBackgroundTurnReference(
+  value: CodexJsonObject,
+): CodexBackgroundTurnReference {
+  const turnId = readString(value, "turnId", "turn_id");
+  const status = readString(value, "status");
+  const lastSequence = readNumber(value, "lastSequence", "last_sequence") ?? 0;
+  if (!turnId || !isBackgroundTurnStatus(status)) {
+    throw new CodexTransportError(
+      "codex_turn_response_invalid",
+      "Codex background turn response is missing its identity or status",
+      value,
+    );
+  }
+  return { turnId, status, lastSequence };
+}
+
+function resolveBackgroundActiveUrl(
+  value: CodexBackgroundTurnEndpoints["activeTurnUrl"],
+  conversationId: string,
+) {
+  return typeof value === "function" ? value(conversationId) : value;
+}
+
+function resolveBackgroundEventsUrl(
+  value: CodexBackgroundTurnEndpoints["eventsUrl"],
+  turnId: string,
+  conversationId: string,
+  afterSequence: number,
+) {
+  return typeof value === "function"
+    ? value(turnId, conversationId, afterSequence)
+    : value;
+}
+
+function resolveBackgroundInterruptUrl(
+  value: CodexBackgroundTurnEndpoints["interruptUrl"],
+  turnId: string,
+  conversationId: string,
+) {
+  return typeof value === "function" ? value(turnId, conversationId) : value;
+}
+
+function readFrameSequence(id: string | null, fallback: number) {
+  if (id === null) return fallback;
+  const value = Number(id);
+  return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+}
+
+function isReconnectableBackgroundError(value: unknown) {
+  if (!(value instanceof CodexTransportError)) return true;
+  return (
+    value.code === "codex_turn_subscription_unavailable" ||
+    value.code === "codex_stream_idle_timeout" ||
+    value.code === "codex_request_timeout"
+  );
+}
+
+async function waitForReconnect(delayMs: number, signal?: AbortSignal) {
+  if (signal?.aborted) throw readAbortReason(signal);
+  await new Promise<void>((resolve, reject) => {
+    const timer = globalThis.setTimeout(done, delayMs);
+    const onAbort = () => {
+      globalThis.clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(readAbortReason(signal));
+    };
+    function done() {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 function resolveUrl(
@@ -594,6 +893,25 @@ function readString(value: CodexJsonObject, ...keys: string[]) {
     if (typeof value[key] === "string") return value[key] as string;
   }
   return null;
+}
+
+function readNumber(value: CodexJsonObject, ...keys: string[]) {
+  for (const key of keys) {
+    if (typeof value[key] === "number") return value[key] as number;
+  }
+  return null;
+}
+
+function isBackgroundTurnStatus(
+  value: string | null,
+): value is CodexBackgroundTurnReference["status"] {
+  return (
+    value === "queued" ||
+    value === "running" ||
+    value === "completed" ||
+    value === "failed" ||
+    value === "interrupted"
+  );
 }
 
 function isRuntimeState(

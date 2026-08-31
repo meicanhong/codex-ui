@@ -143,6 +143,225 @@ describe("CodexThreadProvider", () => {
     );
   });
 
+  it("disconnects the subscription without interrupting a background turn", async () => {
+    const startBackgroundTurn = vi.fn().mockResolvedValue({
+      turnId: "background-turn-1",
+      status: "running",
+      lastSequence: 0,
+    });
+    const interruptBackgroundTurn = vi.fn().mockResolvedValue(undefined);
+    const subscribeBackgroundTurn = vi.fn(async function* (
+      _request: unknown,
+      options?: { signal?: AbortSignal },
+    ) {
+      yield envelope(1, "turn/started", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "inProgress", items: [] },
+      });
+      await new Promise<void>((resolve) =>
+        options?.signal?.addEventListener("abort", () => resolve(), {
+          once: true,
+        }),
+      );
+    });
+    const transport = createTransport(async function* () {}, {
+      capabilities: {
+        interrupt: false,
+        loadThread: false,
+        approvals: false,
+        serverRequests: false,
+        backgroundTurns: true,
+      },
+      startBackgroundTurn,
+      subscribeBackgroundTurn,
+      findActiveBackgroundTurn: vi.fn().mockResolvedValue(null),
+      interruptBackgroundTurn,
+    });
+    const user = userEvent.setup();
+    const view = render(
+      <CodexThreadProvider
+        autoRefreshStatus={false}
+        createConversationId={() => "conversation-1"}
+        transport={transport}
+      >
+        <CodexChat />
+      </CodexThreadProvider>,
+    );
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Message Codex" }),
+      "run{Enter}",
+    );
+    await waitFor(() =>
+      expect(subscribeBackgroundTurn).toHaveBeenCalledTimes(1),
+    );
+    view.unmount();
+
+    expect(startBackgroundTurn).toHaveBeenCalledTimes(1);
+    expect(interruptBackgroundTurn).not.toHaveBeenCalled();
+  });
+
+  it("resumes an active background turn after loading its session", async () => {
+    const findActiveBackgroundTurn = vi.fn().mockResolvedValue({
+      turnId: "background-turn-1",
+      status: "running",
+      lastSequence: 1,
+    });
+    const subscribeBackgroundTurn = vi.fn(async function* () {
+      yield envelope(1, "turn/started", {
+        threadId: "thread-a",
+        turn: { id: "turn-1", status: "inProgress", items: [] },
+      });
+      yield envelope(2, "item/completed", {
+        threadId: "thread-a",
+        turnId: "turn-1",
+        item: {
+          type: "agentMessage",
+          id: "answer-1",
+          text: "后台任务已恢复",
+          phase: "final_answer",
+          memoryCitation: null,
+        },
+      });
+      yield envelope(3, "turn/completed", {
+        threadId: "thread-a",
+        turn: { id: "turn-1", status: "completed", items: [] },
+      });
+    });
+    const transport = createTransport(async function* () {}, {
+      capabilities: {
+        interrupt: false,
+        loadThread: true,
+        approvals: false,
+        serverRequests: false,
+        backgroundTurns: true,
+      },
+      loadThread: vi.fn().mockResolvedValue([]),
+      findActiveBackgroundTurn,
+      subscribeBackgroundTurn,
+      startBackgroundTurn: vi.fn(),
+      interruptBackgroundTurn: vi.fn(),
+    });
+    const user = userEvent.setup();
+    render(
+      <CodexThreadProvider autoRefreshStatus={false} transport={transport}>
+        <ThreadLoadProbe />
+        <CodexChat />
+      </CodexThreadProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Load A" }));
+
+    expect(await screen.findByText("后台任务已恢复")).toBeTruthy();
+    expect(findActiveBackgroundTurn).toHaveBeenCalledWith({
+      conversationId: "conversation-a",
+    });
+    expect(subscribeBackgroundTurn).toHaveBeenCalledWith(
+      { conversationId: "conversation-a", turnId: "background-turn-1" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("sends an attached image as native turn input", async () => {
+    const startTurn = vi.fn<CodexTransport["startTurn"]>(async function* () {});
+    const transport = createTransport(startTurn, {
+      capabilities: {
+        interrupt: false,
+        loadThread: false,
+        approvals: false,
+        serverRequests: false,
+        imageInput: true,
+      },
+    });
+    const { container } = render(
+      <CodexThreadProvider
+        autoRefreshStatus={false}
+        createConversationId={() => "conversation-with-image"}
+        transport={transport}
+      >
+        <CodexChat />
+      </CodexThreadProvider>,
+    );
+    const file = new File([new Uint8Array([137, 80, 78, 71])], "sample.png", {
+      type: "image/png",
+    });
+    const input =
+      container.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+
+    fireEvent.change(input as HTMLInputElement, { target: { files: [file] } });
+    expect(await screen.findByAltText("sample.png")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(startTurn).toHaveBeenCalledTimes(1));
+    expect(startTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "conversation-with-image",
+        message: "",
+        images: [
+          expect.objectContaining({
+            detail: "auto",
+            url: expect.stringMatching(/^data:image\/png;base64,/),
+          }),
+        ],
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it("keeps following output when content growth fires a scroll event first", () => {
+    let resizeCallback: ResizeObserverCallback | null = null;
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+
+        disconnect() {}
+        observe() {}
+        unobserve() {}
+      },
+    );
+    const transport = createTransport(async function* () {});
+    render(
+      <CodexThreadProvider autoRefreshStatus={false} transport={transport}>
+        <CodexChat />
+      </CodexThreadProvider>,
+    );
+
+    const region = screen.getByRole("log");
+    let scrollHeight = 160;
+    const clientHeight = 100;
+    let scrollTop = 0;
+    Object.defineProperties(region, {
+      clientHeight: { configurable: true, get: () => clientHeight },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      scrollTop: {
+        configurable: true,
+        get: () => scrollTop,
+        set: (value: number) => {
+          scrollTop = Math.min(value, scrollHeight - clientHeight);
+        },
+      },
+    });
+
+    act(() => resizeCallback?.([], {} as ResizeObserver));
+    expect(scrollTop).toBe(60);
+
+    scrollHeight = 260;
+    fireEvent.scroll(region);
+    act(() => resizeCallback?.([], {} as ResizeObserver));
+    expect(scrollTop).toBe(160);
+
+    scrollTop = 40;
+    fireEvent.scroll(region);
+    scrollHeight = 320;
+    fireEvent.scroll(region);
+    act(() => resizeCallback?.([], {} as ResizeObserver));
+    expect(scrollTop).toBe(40);
+  });
+
   it("keeps the host conversation stable across native App Server turns", async () => {
     let call = 0;
     const fetchMock = vi.fn<typeof fetch>(async () => {
